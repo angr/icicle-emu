@@ -121,6 +121,15 @@ pub const WRITE_WATCH: u8 = 0b0100_0000;
 
 #[inline(always)]
 pub fn check(perm: u8, mask: u8) -> MemResult<()> {
+    // Watch bits trigger based on the access type: a read to a page with
+    // READ_WATCH set traps, a write to a page with WRITE_WATCH set traps.
+    // The mask determines the access type (READ for loads, WRITE for stores).
+    if perm & READ_WATCH != 0 && mask & READ != 0 {
+        return Err(MemError::ReadWatch);
+    }
+    if perm & WRITE_WATCH != 0 && mask & WRITE != 0 {
+        return Err(MemError::WriteWatch);
+    }
     let perm = perm | !mask;
     if perm & ALL != ALL {
         return Err(get_error_kind(perm));
@@ -130,8 +139,19 @@ pub fn check(perm: u8, mask: u8) -> MemResult<()> {
 
 #[inline(always)]
 pub fn check_bytes<const N: usize>(mut perm: [u8; N], mask: u8) -> MemResult<()> {
-    for (byte, mask) in perm.iter_mut().zip([!mask & ALL; N]) {
-        *byte |= mask;
+    // Check watch bits across all bytes before the normal permission check.
+    for &byte in perm.iter() {
+        if byte & READ_WATCH != 0 && mask & READ != 0 {
+            return Err(MemError::ReadWatch);
+        }
+        if byte & WRITE_WATCH != 0 && mask & WRITE != 0 {
+            return Err(MemError::WriteWatch);
+        }
+    }
+    for (byte, m) in perm.iter_mut().zip([!mask & ALL; N]) {
+        // Mask off non-ALL bits (watch bits) so they don't poison the
+        // != ALL comparison below.
+        *byte = (*byte | m) & ALL;
     }
     if perm != [ALL; N] {
         return Err(get_error_kind_bytes(perm));
@@ -241,11 +261,25 @@ fn test_check() {
 }
 
 #[test]
-#[ignore]
 fn test_read_write_watch() {
-    assert_eq!(check(READ | INIT, READ | INIT | READ_WATCH), Ok(()));
-    assert_eq!(check(READ | INIT | READ_WATCH, READ | INIT | READ_WATCH), Err(MemError::ReadWatch));
+    // A page with READ_WATCH traps on any read access (mask includes READ).
+    // The page must also have READ permission so the watch fires before
+    // the permission check would reject the access.
+    assert_eq!(check(MAP | READ | INIT, READ | INIT), Ok(()));
+    assert_eq!(check(MAP | READ | INIT | READ_WATCH, READ | INIT), Err(MemError::ReadWatch));
 
-    assert_eq!(check(WRITE, WRITE | WRITE_WATCH), Ok(()));
-    assert_eq!(check(WRITE | WRITE_WATCH, WRITE | WRITE_WATCH), Err(MemError::WriteWatch));
+    // READ_WATCH does not fire on write accesses.
+    assert_eq!(check(MAP | READ | WRITE | INIT | READ_WATCH, WRITE), Ok(()));
+
+    // WRITE_WATCH traps on write accesses.
+    assert_eq!(check(MAP | READ | WRITE | INIT, WRITE), Ok(()));
+    assert_eq!(check(MAP | READ | WRITE | INIT | WRITE_WATCH, WRITE), Err(MemError::WriteWatch));
+
+    // WRITE_WATCH does not fire on read accesses.
+    assert_eq!(check(MAP | READ | WRITE | INIT | WRITE_WATCH, READ | INIT), Ok(()));
+
+    // Both watches can be set simultaneously.
+    let both = MAP | READ | WRITE | INIT | READ_WATCH | WRITE_WATCH;
+    assert_eq!(check(both, READ | INIT), Err(MemError::ReadWatch));
+    assert_eq!(check(both, WRITE), Err(MemError::WriteWatch));
 }
