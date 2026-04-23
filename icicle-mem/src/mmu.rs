@@ -557,6 +557,35 @@ impl Mmu {
         Ok(start_addr)
     }
 
+    /// Clear the given permission bits across `[addr, addr + count)`.
+    ///
+    /// Unlike `update_perm`, this only `&!= perm`s the per-byte permissions
+    /// on already-mapped physical pages; it does not change the virtual
+    /// mapping, flip the `MAP` bit, or adjust the TLB. Intended for callers
+    /// that manage their own code-cache invariants and need to drop bits
+    /// like `IN_CODE_CACHE` without altering the region's RWX semantics.
+    pub fn clear_perm_bits(&mut self, addr: u64, count: u64, perm: u8) -> MemResult<()> {
+        if count == 0 {
+            return Ok(());
+        }
+        let end = addr.checked_add(count - 1).ok_or(MemError::AddressOverflow)?;
+        let physical = &mut self.physical;
+        self.mapping.overlapping_mut(addr..=end, |start, len, entry| {
+            match entry.as_mut() {
+                Some(MemoryMapping::Physical(entry)) => {
+                    let offset = PageData::offset(start);
+                    let page = physical.get_mut(entry.index).data_mut();
+                    page.clear_perm(offset, len as usize, perm);
+                }
+                Some(MemoryMapping::Unallocated(e)) => {
+                    e.perm &= !perm;
+                }
+                _ => {}
+            }
+            Ok(())
+        })
+    }
+
     /// Updates the mapping value associated with a region of memory
     pub fn update_perm(&mut self, addr: u64, count: u64, perm: u8) -> MemResult<()> {
         let end = addr.checked_add(count - 1).ok_or(MemError::AddressOverflow)?;

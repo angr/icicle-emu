@@ -331,6 +331,26 @@ impl PageData {
         unsafe { self.add_perm_unchecked(offset, len, perm) }
     }
 
+    /// Clear the given permission bits across a range by 'and'ing with the inverse.
+    #[inline(always)]
+    pub fn clear_perm(&mut self, offset: usize, len: usize, perm: u8) {
+        assert!(offset.checked_add(len).map_or(false, |x| x <= PAGE_SIZE));
+        unsafe { self.clear_perm_unchecked(offset, len, perm) }
+    }
+
+    /// Clear the given permission bits across a range by 'and'ing with the inverse.
+    ///
+    /// # Safety
+    ///
+    /// The range `offset .. offset + len` must be entirely in-bounds.
+    #[inline]
+    pub unsafe fn clear_perm_unchecked(&mut self, offset: usize, len: usize, perm: u8) {
+        let mask = !perm;
+        for byte in self.perm.get_unchecked_mut(offset..offset + len) {
+            *byte &= mask;
+        }
+    }
+
     /// Add permission bits to a specified range by 'or'ing the new permission value with the
     /// existing value.
     ///
