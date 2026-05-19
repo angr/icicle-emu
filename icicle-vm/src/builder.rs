@@ -50,7 +50,13 @@ pub fn build_with_path(config: &Config, processors: &Path) -> Result<Vm, BuildEr
         .add_custom_reg("NEXT_PC", 8)
         .ok_or(BuildError::SpecCompileError("failed to add varnode for `NEXT_PC`".into()))?;
 
-    let reg_isa_mode = lang.sleigh.get_varnode("ISAModeSwitch");
+    // Ghidra 12.1 removed the ISAModeSwitch register from the ARM SLEIGH spec and replaced
+    // it with a .pspec alias (TB -> ISAModeSwitch). Since we don't parse .pspec register_data
+    // aliases, fall back to the underlying TB register.
+    let reg_isa_mode = lang
+        .sleigh
+        .get_varnode("ISAModeSwitch")
+        .or_else(|| lang.sleigh.get_varnode("TB"));
 
     // Set initial context values for architectures that support mode switching.
     //
