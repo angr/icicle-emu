@@ -680,16 +680,23 @@ impl BlockLifter {
         self.instruction_lifter.lifted.recompute_next_tmp();
 
         if self.instruction_lifter.generate_disassembly {
+            // The disasm cache is keyed only on vaddr, but the same vaddr
+            // can yield different disassembly when re-lifted in a different
+            // context (Thumb-2 IT-block predicate carried over from a
+            // preceding ITT/ITE; ISA-mode flips; global-context changes).
+            // Treat a mismatch as the new disassembly winning rather than a
+            // fault — actual code modification is caught at write time by
+            // `check_self_modifying_write` in icicle-mem.
             let new_disasm = &self.instruction_lifter.disasm;
             match ctx.code.disasm.entry(ctx.vaddr) {
-                std::collections::hash_map::Entry::Occupied(old) => {
-                    let old_disasm = old.get();
-                    if old_disasm != new_disasm {
-                        tracing::error!(
-                            "disassembly changed at {:#0x} (from {old_disasm} to {new_disasm})",
-                            ctx.vaddr
+                std::collections::hash_map::Entry::Occupied(mut old) => {
+                    if old.get() != new_disasm {
+                        tracing::debug!(
+                            "disassembly changed at {:#0x} (from {} to {new_disasm})",
+                            ctx.vaddr,
+                            old.get(),
                         );
-                        return Err(DecodeError::DisassemblyChanged);
+                        old.insert(new_disasm.clone());
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
