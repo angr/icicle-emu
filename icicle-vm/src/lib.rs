@@ -20,7 +20,7 @@ pub use crate::{
 pub use icicle_cpu::lifter::BlockTable;
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     rc::Rc,
 };
 
@@ -46,6 +46,9 @@ pub struct Vm {
     pub jit: icicle_jit::JIT,
     pub enable_jit: bool,
     pub enable_recompilation: bool,
+    /// Interpret a block this many times before compiling it (0: compile on first use).
+    pub jit_threshold: u32,
+    jit_hits: HashMap<u64, u32>,
     prev_isa_mode: u8,
 
     /// The number of new blocks that have been compiled since the last full recompilation step.
@@ -85,6 +88,8 @@ impl Vm {
             jit,
             enable_jit: true,
             enable_recompilation: true,
+            jit_threshold: 0,
+            jit_hits: HashMap::new(),
             prev_isa_mode: u8::MAX,
 
             compiled_blocks: 0,
@@ -720,6 +725,15 @@ impl Vm {
         if let Some(&fn_ptr) = self.jit.entry_points.get(&key) {
             self.jit.add_fast_lookup(addr, fn_ptr);
             return fn_ptr;
+        }
+
+        // Code that runs only a few times is cheaper to interpret than to compile
+        if self.jit_threshold > 0 {
+            let hits = self.jit_hits.entry(addr).or_insert(0);
+            *hits += 1;
+            if *hits < self.jit_threshold {
+                return icicle_jit::runtime::switch_to_interpreter;
+            }
         }
 
         // The block needs to be compiled
