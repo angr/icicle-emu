@@ -708,7 +708,8 @@ impl Mmu {
         let snapshot = SnapshotData {
             mapping: self.mapping.clone(),
             physical: self.physical.snapshot(),
-            parent: Some(self.parent_state.clone()),
+            // nothing reads the link, and keeping it chains every snapshot ever taken into memory
+            parent: None,
             io: self.io.iter_mut().map(|x| x.snapshot()).collect(),
         };
 
