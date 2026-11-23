@@ -1060,7 +1060,8 @@ impl_float_single_op! { FloatAbs,    (a, a.abs()) }
 impl_float_single_op! { FloatSqrt,   (a, a.sqrt()) }
 impl_float_single_op! { FloatCeil,   (a, a.ceil()) }
 impl_float_single_op! { FloatFloor,  (a, a.floor()) }
-impl_float_single_op! { FloatRound,  (a, a.round()) }
+// ties to even: the default x87 / SSE rounding, and what the JIT's `nearest` does
+impl_float_single_op! { FloatRound,  (a, a.round_ties_even()) }
 
 trait FloatCmpOp<T>: Sized {
     fn eval(a: T, b: T) -> bool;
